@@ -209,10 +209,11 @@ func (rf *Raft) isUpToDate(cTerm, cIdx int) bool {
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	defer rf.persist()
+
 	if ok {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
+		defer rf.persist()
 		if rf.currentState != Candidate || rf.currentTerm != args.Term {
 			return ok
 		}
