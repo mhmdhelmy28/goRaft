@@ -248,9 +248,10 @@ func (rf *Raft) sendAllRequestVotes() {
 	args.LastLogTerm = rf.getLastLogTerm()
 	args.LastLogIndex = rf.getLastLogIndex()
 	args.CandidateId = rf.me
+	currState := rf.currentState == Candidate
 	rf.mu.Unlock()
 	for p := range rf.peers {
-		if p != rf.me && rf.currentState == Candidate {
+		if p != rf.me && currState {
 			log := fmt.Sprintf("%d sent request vote to %d at term %d", rf.me, p, args.Term)
 			DPrintf(log)
 			reply := RequestVoteReply{}
@@ -314,15 +315,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		return
 	} else {
-		// will contain logs from last committed index + 1
-		var unCommittedLogs []LogEntry
-		rf.logs, unCommittedLogs = rf.logs[:args.PrevLogIndex+1], rf.logs[args.PrevLogIndex+1:]
-
-		if hasConflict(args.Entries, unCommittedLogs) || len(unCommittedLogs) < len(args.Entries) {
-			rf.logs = append(rf.logs, args.Entries...)
-		} else {
-			rf.logs = append(rf.logs, unCommittedLogs...)
+		// only include logs that does not exist
+		i, j := args.PrevLogIndex+1, 0
+		for ; i < lastIndex+1 && j < len(args.Entries); i, j = i+1, j+1 {
+			if rf.logs[i].Term != args.Entries[j].Term {
+				break
+			}
 		}
+		rf.logs = rf.logs[:i]
+		args.Entries = args.Entries[j:]
+		rf.logs = append(rf.logs, args.Entries...)
+
 		reply.Success = true
 		// if the leader has the conflict term in its log then it should update nextIndex to first entry of that term
 		// else it should set nextIndex to conflictIndex
@@ -397,15 +400,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 	}
 	return ok
-}
-
-func hasConflict(logs, entries []LogEntry) bool {
-	for i := 0; i < min(len(logs), len(entries)); i++ {
-		if logs[i].Term != entries[i].Term {
-			return true
-		}
-	}
-	return false
 }
 
 func (rf *Raft) sendAllAppendEntries() {
